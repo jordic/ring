@@ -11,10 +11,10 @@ Both use the same macOS Keychain service (`com.ring.tokenstore`).
 ## Screenshots
 
 ### Providers in the menu bar popover
-![Ring popover with providers](docs/screenshots/ring-popover.png)
+![Ring popover with providers](DOCS/screenshots/ring-popover.png)
 
 ### In-popover setup wizard
-![Ring setup wizard in popover](docs/screenshots/ring-setup-wizard.png)
+![Ring setup wizard in popover](DOCS/screenshots/ring-setup-wizard.png)
 
 ## Why ring
 
