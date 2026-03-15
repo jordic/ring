@@ -32,9 +32,7 @@ targets:
         INFOPLIST_FILE: Sources/Info.plist
         INFOPLIST_KEY_NSHumanReadableDescription: Local OAuth & credential manager for macOS
         CODE_SIGN_ENTITLEMENTS: Sources/Ring.entitlements
-        CODE_SIGN_IDENTITY: "-"
-        CODE_SIGN_STYLE: Manual
-        PROVISIONING_PROFILE_SPECIFIER: ""
+        CODE_SIGN_STYLE: Automatic
         ARCHS: "arm64 x86_64"
     entitlements:
       path: Sources/Ring.entitlements

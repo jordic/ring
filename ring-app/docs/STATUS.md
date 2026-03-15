@@ -79,6 +79,6 @@ Created a WindowManager that opens views in completely standalone NSWindows (not
 ```bash
 cd /Users/jordi/projects/ring/ring-app
 xcodegen generate
-xcodebuild -scheme Ring -configuration Debug CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO build
+xcodebuild -scheme Ring -configuration Debug build
 open ~/Library/Developer/Xcode/DerivedData/Ring-gvqrmooyftlhrkaseqhilqmblyjp/Build/Products/Debug/Ring.app
 ```

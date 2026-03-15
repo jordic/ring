@@ -65,8 +65,17 @@ cd ring-app
 xcodegen generate
 xcodebuild -scheme Ring -configuration Debug \
   -derivedDataPath /tmp/ring-derived \
-  CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO build
+  build
 open /tmp/ring-derived/Build/Products/Debug/Ring.app
+```
+
+### 3) Install to a stable app path (recommended for fewer Keychain prompts)
+
+```bash
+cd ring-app
+make install-app
+# if needed:
+# sudo make install-app
 ```
 
 ## CLI usage examples
