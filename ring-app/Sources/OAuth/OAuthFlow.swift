@@ -323,7 +323,9 @@ final class OAuthFlow: NSObject {
     }
 
     private func urlEncode(_ string: String) -> String {
-        string.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? string
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "&=+")
+        return string.addingPercentEncoding(withAllowedCharacters: allowed) ?? string
     }
 
     private func mergeScopes(_ existing: [String], _ new: [String]) -> [String] {

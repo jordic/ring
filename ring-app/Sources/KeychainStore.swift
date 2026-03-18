@@ -24,23 +24,116 @@ struct ProviderStatus: Identifiable {
 
 // MARK: - KeychainStore
 
-/// Reads and writes the macOS Keychain using the exact same service name and key
-/// convention as the Go CLI, so both components share a single source of truth.
+/// Reads and writes the macOS Keychain using a single JSON blob,
+/// sharing the same service name as the Go CLI.
 @MainActor
 final class KeychainStore: ObservableObject {
 
     // MUST match `const Service = "com.ring.tokenstore"` in the Go CLI
     static let service = "com.ring.tokenstore"
+    static let storeAccount = "data"
 
     @Published var providers: [ProviderStatus] = []
 
+    /// In-memory cache of all key-value pairs.
+    private var store: [String: String] = [:]
+
     init() {
+        loadFromKeychain()
+        migrateOldFormat()
         refresh()
     }
 
-    // MARK: - Low-level primitives
+    // MARK: - Single-blob Keychain I/O
 
-    func getString(_ account: String) -> String? {
+    private func loadFromKeychain() {
+        let query: [CFString: Any] = [
+            kSecClass:            kSecClassGenericPassword,
+            kSecAttrService:      Self.service,
+            kSecAttrAccount:      Self.storeAccount,
+            kSecReturnData:       true,
+            kSecMatchLimit:       kSecMatchLimitOne,
+        ]
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess,
+              let data = result as? Data,
+              let dict = try? JSONDecoder().decode([String: String].self, from: data) else {
+            store = [:]
+            return
+        }
+        store = dict
+    }
+
+    private func saveToKeychain() {
+        guard let data = try? JSONEncoder().encode(store) else { return }
+
+        let query: [CFString: Any] = [
+            kSecClass:       kSecClassGenericPassword,
+            kSecAttrService: Self.service,
+            kSecAttrAccount: Self.storeAccount,
+        ]
+        let attrs: [CFString: Any] = [kSecValueData: data]
+
+        let status = SecItemUpdate(query as CFDictionary, attrs as CFDictionary)
+        if status == errSecItemNotFound {
+            var addQuery = query
+            addQuery[kSecValueData] = data
+            SecItemAdd(addQuery as CFDictionary, nil)
+        }
+    }
+
+    // MARK: - Migration from old per-key format
+
+    private func migrateOldFormat() {
+        guard store.isEmpty else { return }
+
+        let suffixes = [
+            ".client_id", ".client_secret",
+            ".access_token", ".refresh_token", ".expires_at", ".scopes",
+            ".api_key", ".secret_id", ".secret_key",
+        ]
+
+        var migrated = false
+        var oldKeys: [String] = []
+
+        for provider in Provider.all {
+            for suffix in suffixes {
+                let key = "\(provider.id)\(suffix)"
+                if let value = readOldItem(key) {
+                    store[key] = value
+                    oldKeys.append(key)
+                    migrated = true
+                }
+            }
+        }
+
+        // Migrate credentials.list and credential entries
+        if let list = readOldItem("credentials.list") {
+            store["credentials.list"] = list
+            oldKeys.append("credentials.list")
+            migrated = true
+            let credSuffixes = [".username", ".password", ".totp_secret", ".session_path"]
+            for id in list.split(separator: ",").map(String.init) where !id.isEmpty {
+                for suffix in credSuffixes {
+                    let key = "\(id)\(suffix)"
+                    if let value = readOldItem(key) {
+                        store[key] = value
+                        oldKeys.append(key)
+                    }
+                }
+            }
+        }
+
+        if migrated {
+            saveToKeychain()
+            for key in oldKeys {
+                deleteOldItem(key)
+            }
+        }
+    }
+
+    private func readOldItem(_ account: String) -> String? {
         let query: [CFString: Any] = [
             kSecClass:            kSecClassGenericPassword,
             kSecAttrService:      Self.service,
@@ -58,25 +151,7 @@ final class KeychainStore: ObservableObject {
         return str
     }
 
-    func setString(_ account: String, value: String) {
-        guard let data = value.data(using: .utf8) else { return }
-
-        let query: [CFString: Any] = [
-            kSecClass:       kSecClassGenericPassword,
-            kSecAttrService: Self.service,
-            kSecAttrAccount: account,
-        ]
-        let attrs: [CFString: Any] = [kSecValueData: data]
-
-        let status = SecItemUpdate(query as CFDictionary, attrs as CFDictionary)
-        if status == errSecItemNotFound {
-            var addQuery = query
-            addQuery[kSecValueData] = data
-            SecItemAdd(addQuery as CFDictionary, nil)
-        }
-    }
-
-    func delete(_ account: String) {
+    private func deleteOldItem(_ account: String) {
         let query: [CFString: Any] = [
             kSecClass:       kSecClassGenericPassword,
             kSecAttrService: Self.service,
@@ -85,8 +160,24 @@ final class KeychainStore: ObservableObject {
         SecItemDelete(query as CFDictionary)
     }
 
+    // MARK: - Key-value accessors (same API as before)
+
+    func getString(_ account: String) -> String? {
+        store[account]
+    }
+
+    func setString(_ account: String, value: String) {
+        store[account] = value
+        saveToKeychain()
+    }
+
+    func delete(_ account: String) {
+        store.removeValue(forKey: account)
+        saveToKeychain()
+    }
+
     func exists(_ account: String) -> Bool {
-        getString(account) != nil
+        store[account] != nil
     }
 
     // MARK: - Token entry (OAuth2)
@@ -105,23 +196,25 @@ final class KeychainStore: ObservableObject {
     }
 
     func setEntry(_ providerID: String, entry: TokenEntry) {
-        setString("\(providerID).access_token", value: entry.accessToken)
+        store["\(providerID).access_token"] = entry.accessToken
         if !entry.refreshToken.isEmpty {
-            setString("\(providerID).refresh_token", value: entry.refreshToken)
+            store["\(providerID).refresh_token"] = entry.refreshToken
         }
         if let expiresAt = entry.expiresAt {
-            setString("\(providerID).expires_at", value: ISO8601DateFormatter().string(from: expiresAt))
+            store["\(providerID).expires_at"] = ISO8601DateFormatter().string(from: expiresAt)
         }
         if !entry.scopes.isEmpty {
-            setString("\(providerID).scopes", value: entry.scopes.joined(separator: ","))
+            store["\(providerID).scopes"] = entry.scopes.joined(separator: ",")
         }
+        saveToKeychain()
     }
 
     func clearTokens(_ providerID: String) {
-        delete("\(providerID).access_token")
-        delete("\(providerID).refresh_token")
-        delete("\(providerID).expires_at")
-        delete("\(providerID).scopes")
+        store.removeValue(forKey: "\(providerID).access_token")
+        store.removeValue(forKey: "\(providerID).refresh_token")
+        store.removeValue(forKey: "\(providerID).expires_at")
+        store.removeValue(forKey: "\(providerID).scopes")
+        saveToKeychain()
     }
 
     // MARK: - Configuration (client_id / api_key)
@@ -161,13 +254,14 @@ final class KeychainStore: ObservableObject {
             ".api_key", ".secret_id", ".secret_key",
         ]
         for suffix in suffixes {
-            delete("\(providerID)\(suffix)")
+            store.removeValue(forKey: "\(providerID)\(suffix)")
         }
+        saveToKeychain()
     }
 
     // MARK: - Reactive state
 
-    /// Rebuilds the published provider status array from the keychain.
+    /// Rebuilds the published provider status array from the in-memory store.
     func refresh() {
         providers = Provider.all.map { provider in
             let configured = isConfigured(provider.id)

@@ -38,8 +38,6 @@ targets:
       path: Sources/Ring.entitlements
       properties:
         com.apple.security.app-sandbox: false
-        keychain-access-groups:
-          - com.ring.tokenstore
     info:
       path: Sources/Info.plist
       properties:
